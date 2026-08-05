@@ -31,14 +31,14 @@ def _state_path(profile: str) -> Path:
 
 def _load_state(path: Path) -> dict[str, Any]:
     try:
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return {"last_seen_message_id": 0}
 
 
 def _save_state(path: Path, state: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, sort_keys=True, indent=2) + "\n")
+    path.write_text(json.dumps(state, sort_keys=True, indent=2) + "\n", encoding="utf-8")
 
 
 def _fetch_unread(identity: str, project_key: str, after_id: int, limit: int) -> list[dict[str, Any]]:
