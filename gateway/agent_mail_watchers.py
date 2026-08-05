@@ -65,24 +65,6 @@ def _fetch_unread(identity: str, project_key: str, after_id: int, limit: int) ->
     return [dict(row) for row in rows]
 
 
-def _mark_read(identity: str, project_key: str, message_id: int) -> None:
-    con = sqlite3.connect(_MAIL_DB, timeout=5)
-    try:
-        con.execute(
-            """
-            update message_recipients set read_ts = coalesce(read_ts, ?)
-             where message_id = ? and agent_id = (
-                select a.id from agents a join projects p on p.id = a.project_id
-                 where p.human_key = ? and a.name = ? and a.retired_at is null
-             )
-            """,
-            (time.strftime("%Y-%m-%dT%H:%M:%S%z"), message_id, project_key, identity),
-        )
-        con.commit()
-    finally:
-        con.close()
-
-
 def _wake_text(identity: str, message: dict[str, Any]) -> str:
     body = str(message.get("body_md") or "")[:6000]
     return "\n".join((

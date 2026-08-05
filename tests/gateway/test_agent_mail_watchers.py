@@ -66,21 +66,17 @@ def test_successful_delivery_advances_only_its_profile_cursor_and_never_marks_re
         daery_state.write_text(json.dumps({"last_seen_message_id": 77}))
         original_fetch = watcher._fetch_unread
         original_deliver = watcher.deliver_wake
-        original_mark = watcher._mark_read
         delivered = []
 
         async def accepted_deliver(_adapter, *, text, source, message_id):
             delivered.append((text, source, message_id))
-
-        def must_not_mark_read(*_args, **_kwargs):
-            raise AssertionError("gateway delivery must not mark Agent Mail read")
 
         try:
             watcher._fetch_unread = lambda *_args: [
                 {"id": 11, "sender": "BrightTower", "subject": "accepted", "importance": "normal", "thread_id": None, "body_md": "x"}
             ]
             watcher.deliver_wake = accepted_deliver
-            watcher._mark_read = must_not_mark_read
+            assert not hasattr(watcher, "_mark_read")
             count = asyncio.run(
                 watcher._deliver_unread_once(
                     adapter=object(),
@@ -99,7 +95,6 @@ def test_successful_delivery_advances_only_its_profile_cursor_and_never_marks_re
         finally:
             watcher._fetch_unread = original_fetch
             watcher.deliver_wake = original_deliver
-            watcher._mark_read = original_mark
 
 
 def test_fetch_unread_is_recipient_scoped():
