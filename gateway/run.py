@@ -2320,6 +2320,7 @@ from gateway.session_state import (
 )
 from gateway.authz_mixin import GatewayAuthorizationMixin
 from gateway.kanban_watchers import GatewayKanbanWatchersMixin
+from gateway.agent_mail_watchers import GatewayAgentMailWatchersMixin
 from gateway.slash_commands import GatewaySlashCommandsMixin
 from gateway.turn_context import TurnContext
 from gateway.platforms.base import (
@@ -5701,7 +5702,7 @@ class TurnRunner:
 
 
 
-class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, GatewaySlashCommandsMixin):
+class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, GatewayAgentMailWatchersMixin, GatewaySlashCommandsMixin):
     """
     Main gateway controller.
 
@@ -11427,6 +11428,10 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # subscriptions owned by the profiles whose adapters it hosts, even
         # when another gateway owns the single dispatcher.
         self._spawn_supervised(self._kanban_notifier_watcher, "kanban_notifier_watcher")
+
+        # Profile-scoped Agent Mail wakes. Disabled unless the profile explicitly
+        # supplies a mailbox identity and target platform channel.
+        self._spawn_supervised(self._agent_mail_watcher, "agent_mail_watcher")
 
         # Start background kanban dispatcher — spawns workers for ready
         # tasks. Gated by `kanban.dispatch_in_gateway` (default True).
