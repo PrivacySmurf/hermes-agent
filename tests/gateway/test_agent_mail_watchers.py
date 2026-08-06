@@ -99,7 +99,9 @@ def test_successful_delivery_advances_only_its_profile_cursor_and_never_marks_re
 
 def test_fetch_unread_is_recipient_scoped():
     with tempfile.TemporaryDirectory() as directory:
-        db_path = Path(directory) / "mail.sqlite3"
+        project_path = Path(directory) / "portable-project"
+        db_path = project_path / "Resources" / "external" / "mcp_agent_mail" / "storage.sqlite3"
+        db_path.parent.mkdir(parents=True)
         con = watcher.sqlite3.connect(db_path)
         try:
             con.executescript(
@@ -120,16 +122,23 @@ def test_fetch_unread_is_recipient_scoped():
                 insert into message_recipients values (13, 2, '2026-01-01T00:00:03Z');
                 """
             )
+            con.execute("update projects set human_key = ? where id = 1", (str(project_path),))
             con.commit()
         finally:
             con.close()
-        original_db = watcher._MAIL_DB
+        assert [row["id"] for row in watcher._fetch_unread("SilverHarbor", str(project_path), 0, 10)] == [11]
+        assert [row["id"] for row in watcher._fetch_unread("IronPaw", str(project_path), 0, 10)] == [12]
+
+
+def test_missing_project_storage_fails_with_configured_path():
+    with tempfile.TemporaryDirectory() as directory:
+        missing_project = Path(directory) / "missing-project"
         try:
-            watcher._MAIL_DB = db_path
-            assert [row["id"] for row in watcher._fetch_unread("SilverHarbor", "project", 0, 10)] == [11]
-            assert [row["id"] for row in watcher._fetch_unread("IronPaw", "project", 0, 10)] == [12]
-        finally:
-            watcher._MAIL_DB = original_db
+            watcher._fetch_unread("IronPaw", str(missing_project), 0, 1)
+        except FileNotFoundError as exc:
+            assert str(missing_project) in str(exc)
+        else:
+            raise AssertionError("missing project storage must fail loudly")
 
 
 if __name__ == "__main__":
