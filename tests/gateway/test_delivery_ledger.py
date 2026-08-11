@@ -93,6 +93,51 @@ class TestStateMachine:
         _record()
         assert _row("ob-1")["state"] == "pending"
 
+    def test_full_happy_path(self):
+        _record()
+        dl.mark_attempting("ob-1")
+        assert _row("ob-1")["state"] == "attempting"
+        dl.mark_delivered("ob-1")
+        assert _row("ob-1")["state"] == "delivered"
+
+    def test_mark_delivered_with_platform_id_stores_id(self):
+        _record(oid="ob-platform-id")
+        dl.mark_attempting("ob-platform-id")
+        dl.mark_delivered_with_platform_id("ob-platform-id", "discord-msg-999")
+        with dl._connect() as conn:
+            row = conn.execute(
+                "SELECT state, platform_message_id FROM delivery_obligations "
+                "WHERE obligation_id=?",
+                ("ob-platform-id",),
+            ).fetchone()
+        assert row[0] == "delivered"
+        assert row[1] == "discord-msg-999"
+
+    def test_mark_delivered_backward_compat(self):
+        _record(oid="ob-backcompat")
+        dl.mark_attempting("ob-backcompat")
+        dl.mark_delivered("ob-backcompat")
+        with dl._connect() as conn:
+            row = conn.execute(
+                "SELECT state, platform_message_id FROM delivery_obligations "
+                "WHERE obligation_id=?",
+                ("ob-backcompat",),
+            ).fetchone()
+        assert row[0] == "delivered"
+        assert row[1] is None
+
+    def test_failed_records_error(self):
+        _record()
+        dl.mark_attempting("ob-1")
+        dl.mark_failed("ob-1", "chat_not_found")
+        assert _row("ob-1")["state"] == "failed"
+
+    def test_rerecord_same_id_is_idempotent(self):
+        _record()
+        dl.mark_attempting("ob-1")
+        _record()  # INSERT OR REPLACE resets to pending — same turn re-record
+        assert _row("ob-1")["state"] == "pending"
+
 
 class TestObligationId:
     def test_stable_and_distinct(self):
