@@ -9,7 +9,9 @@ id stability, and the startup redelivery sweep's contract:
 - poison rows abandon at the attempts cap / stale cutoff
 """
 
+import tempfile
 import time
+from pathlib import Path
 import threading
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -93,6 +95,51 @@ class TestStateMachine:
         _record()
         assert _row("ob-1")["state"] == "pending"
 
+    def test_full_happy_path(self):
+        _record()
+        dl.mark_attempting("ob-1")
+        assert _row("ob-1")["state"] == "attempting"
+        dl.mark_delivered("ob-1")
+        assert _row("ob-1")["state"] == "delivered"
+
+    def test_mark_delivered_with_platform_id_stores_id(self):
+        _record(oid="ob-platform-id")
+        dl.mark_attempting("ob-platform-id")
+        dl.mark_delivered_with_platform_id("ob-platform-id", "discord-msg-999")
+        with dl._connect() as conn:
+            row = conn.execute(
+                "SELECT state, platform_message_id FROM delivery_obligations "
+                "WHERE obligation_id=?",
+                ("ob-platform-id",),
+            ).fetchone()
+        assert row[0] == "delivered"
+        assert row[1] == "discord-msg-999"
+
+    def test_mark_delivered_backward_compat(self):
+        _record(oid="ob-backcompat")
+        dl.mark_attempting("ob-backcompat")
+        dl.mark_delivered("ob-backcompat")
+        with dl._connect() as conn:
+            row = conn.execute(
+                "SELECT state, platform_message_id FROM delivery_obligations "
+                "WHERE obligation_id=?",
+                ("ob-backcompat",),
+            ).fetchone()
+        assert row[0] == "delivered"
+        assert row[1] is None
+
+    def test_failed_records_error(self):
+        _record()
+        dl.mark_attempting("ob-1")
+        dl.mark_failed("ob-1", "chat_not_found")
+        assert _row("ob-1")["state"] == "failed"
+
+    def test_rerecord_same_id_is_idempotent(self):
+        _record()
+        dl.mark_attempting("ob-1")
+        _record()  # INSERT OR REPLACE resets to pending — same turn re-record
+        assert _row("ob-1")["state"] == "pending"
+
 
 class TestObligationId:
     def test_stable_and_distinct(self):
@@ -134,6 +181,40 @@ class TestPrune:
             )
         dl._prune()
         assert _row("ob-1") is None
+
+    def test_migration_additive_existing_rows_have_null_platform_message_id(self):
+        """Schema migration is additive: pre-existing rows get NULL platform_message_id."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ledger.db"
+            # Create a "legacy" DB without platform_message_id column
+            import sqlite3 as _sqlite3
+
+            with _sqlite3.connect(str(db_path)) as conn:
+                conn.execute(
+                    "CREATE TABLE delivery_obligations "
+                    "(obligation_id TEXT PRIMARY KEY, state TEXT NOT NULL DEFAULT 'pending', "
+                    "created_at REAL NOT NULL DEFAULT (unixepoch('now')))"
+                )
+                conn.execute(
+                    "INSERT INTO delivery_obligations (obligation_id) VALUES ('legacy-ob-1')"
+                )
+            # Now run the real schema setup (which adds platform_message_id via ALTER TABLE or CREATE IF NOT EXISTS)
+            import gateway.delivery_ledger as dl_mod
+            orig_db_path = dl_mod._db_path
+            dl_mod._db_path = lambda: db_path
+            try:
+                dl_mod._ensure_schema(dl_mod._connect())
+            finally:
+                dl_mod._db_path = orig_db_path
+            # Verify legacy row has NULL platform_message_id
+            with _sqlite3.connect(str(db_path)) as conn:
+                row = conn.execute(
+                    "SELECT platform_message_id FROM delivery_obligations WHERE obligation_id='legacy-ob-1'"
+                ).fetchone()
+            assert row is not None
+            assert row[0] is None, (
+                "existing rows should have NULL platform_message_id after migration"
+            )
 
 
 class TestLedgerEnabled:

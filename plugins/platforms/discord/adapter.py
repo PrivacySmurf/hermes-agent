@@ -143,6 +143,7 @@ except ImportError:
 from gateway.config import Platform, PlatformConfig
 
 from gateway.platforms.helpers import (
+    DurableVoiceDeduplicator,
     MessageDeduplicator,
     ThreadParticipationTracker,
     convert_table_to_bullets,
@@ -1096,6 +1097,7 @@ class DiscordAdapter(BasePlatformAdapter):
         # Dedup cache: prevents duplicate bot responses when Discord
         # RESUME replays events after reconnects.
         self._dedup = MessageDeduplicator()
+        self._voice_dedup = DurableVoiceDeduplicator()
         # Reply threading mode: "off" (no replies), "first" (reply on first
         # chunk only, default), "all" (reply-reference on every chunk).
         self._reply_to_mode: str = getattr(config, 'reply_to_mode', 'first') or 'first'
@@ -1429,6 +1431,17 @@ class DiscordAdapter(BasePlatformAdapter):
         if claim:
             if self._dedup.is_duplicate(message_id):
                 return False, False
+            if getattr(message, "attachments", None):
+                for att in message.attachments:
+                    att_id = str(getattr(att, "id", "") or "")
+                    if att_id and self._is_discord_voice_message_attachment(att):
+                        if self._voice_dedup.is_duplicate(message_id, att_id):
+                            logger.debug(
+                                "[Discord] Voice dedup: msg=%s att=%s",
+                                message_id,
+                                att_id,
+                            )
+                            return False, False
         elif self._dedup.contains(message_id):
             return False, False
         if message.author == self._client.user:
