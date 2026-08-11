@@ -145,13 +145,17 @@ class TestProducerHook:
         with patch("gateway.delivery_ledger.record_obligation"), patch(
             "gateway.delivery_ledger.mark_attempting"
         ), patch(
-            "gateway.delivery_ledger.mark_delivered",
+            "gateway.delivery_ledger.mark_delivered_with_platform_id",
             side_effect=slow_delivered,
-        ):
+        ) as mock_delivered:
             await asyncio.gather(_run(adapter, _event()), event_loop_witness())
 
         assert blocked_event_loop == []
         assert adapter.sent == ["final answer"]
+        # Verify new symbol is called with (obligation_id, platform_message_id)
+        mock_delivered.assert_called_once()
+        call_args = mock_delivered.call_args[0]
+        assert call_args[1] == "m1", f"expected platform_message_id='m1', got {call_args[1]!r}"
 
     @pytest.mark.asyncio
     async def test_crash_between_attempting_and_ack_is_recoverable(self):
